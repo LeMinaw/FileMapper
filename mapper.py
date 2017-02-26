@@ -40,6 +40,22 @@ def bitsFromFile(path):
     return BitArray(sourceData).bin
 
 
+def truncate(data, start, end):
+    """Relative file truncation.
+    start: In %, where to start
+    end: In %, where to stop"""
+
+    start = int(len(data) * start / 100)
+    end   = int(len(data) * end   / 100)
+
+    if start == end:
+        return None
+    elif start > end:
+        end, start = start, end
+        data.reverse()
+    return data[start:end]
+
+
 def map(data, scale=1, ratio=1, multiple=1, cellX=1, cellY=1, mode='offset', name='generated'):
     """Returns a PNG image from a string of binay data.\n
     data: String, the input data (as 0s and 1s)
@@ -49,7 +65,7 @@ def map(data, scale=1, ratio=1, multiple=1, cellX=1, cellY=1, mode='offset', nam
     name: String, the output file  name (without extension)"""
 
     cellRatio = cellX/cellY
-    if mode == 'offset':
+    if mode == 'offset' or mode=='split':
         sizeCorrectorX = cellX
         sizeCorrectorY = cellY
     else:
@@ -76,6 +92,25 @@ def map(data, scale=1, ratio=1, multiple=1, cellX=1, cellY=1, mode='offset', nam
                     for x in range(0, cellX):
                         try:
                             chanData += int(data[(line*cellY+y) * sizeX*cellX + (pixel*cellX+x)])
+                        except IndexError:
+                            oor += 1
+                            chanData = 0
+                    chanData = int(linear(chanData, 0, cellX, 0, 255))
+                    colorData.append(chanData)
+                image.putpixel((pixel, line), tuple(colorData))
+            print("Processed line", line, "/", sizeY)
+
+    elif mode == 'split':
+        zoneSize = len(data) // cellY
+
+        for line in range(0, sizeY):
+            for pixel in range(0, sizeX):
+                colorData = []
+                for y in range(0, cellY):
+                    chanData = 0
+                    for x in range(0, cellX):
+                        try:
+                            chanData += int(data[line*sizeX*cellX + zoneSize*y + pixel*cellX+x])
                         except IndexError:
                             oor += 1
                             chanData = 0
@@ -139,13 +174,11 @@ if __name__=='__main__':
     while True:
         f = input("Path: ")
         data = bitsFromFile(f)
+        #data = truncate(data, 45, 55)
         #print(data)
         #print(percentOfChar(data, '1'))
-        #map(data, scale=4, ratio=16/9, multiple=1, cellX=64, cellY=3, mode='offset', name=f)
 
         map(data, scale=4, ratio=16/9, multiple=16, cellX=1, cellY=1, mode='bin', name=f+'-bin')
-
-        map(data, scale=4, ratio=16/9, multiple=16, cellX=3, cellY=3, mode='sliding', name=f+'-sliding')
-
+        #map(data, scale=4, ratio=16/9, multiple=16, cellX=3, cellY=3, mode='sliding', name=f+'-sliding')
         for integ in (64, 32, 24, 16, 12, 8, 6, 4, 2, 1):
-            map(data, scale=4, ratio=16/9, multiple=16, cellX=integ, cellY=3, mode='offset', name=f+'-'+str(integ))
+            map(data, scale=4, ratio=16/9, multiple=16, cellX=integ, cellY=3, mode='split', name=f+'-'+str(integ))
