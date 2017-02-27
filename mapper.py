@@ -2,10 +2,30 @@
 
 """A module used for generating images from binary data."""
 
-from PIL       import Image, ImageDraw, ImageColor
-from bitstring import BitArray
-from math      import ceil, sqrt
-from os        import close
+from PIL             import Image, ImageDraw, ImageColor
+from bitstring       import BitArray
+from math            import ceil, sqrt
+from multiprocessing import Pool
+from os              import close
+
+
+def percentOfChar(data, char):
+    """Returns the percent of a given char in a string.\n
+    data: String, the input
+    char: String, the char to count"""
+
+    return data.count(char)/len(data)*100
+
+
+def nceil(x, n=1):
+    """Returns the next n-multiple of a number.\n
+    x: Float, the input number
+    n: Float, will be the next multiple of this number"""
+    y = ceil(x) - ceil(x) % n
+    if y < x:
+        y += n
+
+    return y
 
 
 def linear(x, xMin, xMax, yMin, yMax):
@@ -56,7 +76,51 @@ def truncate(data, start, end):
     return data[start:end]
 
 
-def map(data, scale=1, ratio=1, multiple=1, cellX=1, cellY=1, mode='offset', name='generated'):
+def computePixel(mode, data, line, pixel, sizeY, sizeX, cellY, cellX, zoneSize):
+    """Pixel computation logic. Not really to be called manually...\n
+    Modes :\n
+    - bin
+    - offset
+    - y-offset
+    - split
+    - sliding (REMOVED)"""
+
+    if mode == 'bin':
+        try:
+            if data[line * sizeX + pixel] == '1':
+                return (0, 0, 0)
+        except IndexError:
+            pass
+        return 0
+    else:
+        colorData = []
+        for y in range(0, cellY):
+            chanData = 0
+            for x in range(0, cellX):
+                try:
+                    if mode == 'offset':
+                        chanData += int(data[(line*cellY+y) * sizeX*cellX + (pixel*cellX+x)])
+                    elif mode == 'split':
+                        chanData += int(data[line*sizeX*cellX + zoneSize*y + pixel*cellX+x])
+                except IndexError:
+                    chanData = 0
+            chanData = int(linear(chanData, 0, cellX, 0, 255))
+            colorData.append(chanData)
+        return tuple(colorData)
+
+    # Old snippet from an old mode :
+    # for y in range(int((1-cellY)/2), int((1+cellY)/2)):
+    #     chanData = 0
+    #     for x in range(int((1-cellX)/2), int((1+cellX)/2)):
+    #         try:
+    #             chanData += int(data[(line+y) * sizeX + pixel+x])
+    #         except IndexError:
+    #             pass
+    #         chanData = int(linear(chanData, 0, cellX, 0, 255))
+    #     colorData.append(chanData)
+
+
+def map(data, scale=1, ratio=1, multiple=1, cellX=1, cellY=1, mode='offset', name='generated', processes=2):
     """Returns a PNG image from a string of binay data.\n
     data: String, the input data (as 0s and 1s)
     scale: Int, the size of a data square (in px)
@@ -65,120 +129,46 @@ def map(data, scale=1, ratio=1, multiple=1, cellX=1, cellY=1, mode='offset', nam
     name: String, the output file  name (without extension)"""
 
     cellRatio = cellX/cellY
-    if mode == 'offset' or mode=='split':
-        sizeCorrectorX = cellX
-        sizeCorrectorY = cellY
-    else:
+    if mode == 'normal':
         sizeCorrectorX = 1
         sizeCorrectorY = 1
+    else:
+        sizeCorrectorX = cellX
+        sizeCorrectorY = cellY
 
     sizeX = nceil((sqrt(len(data))*   sqrt(ratio*cellRatio) )/sizeCorrectorX, lcm(multiple, cellX))
     sizeY = nceil((sqrt(len(data))*(1/sqrt(ratio*cellRatio)))/sizeCorrectorY, 1)
-
-    # sizeX = nceil(sqrt(len(data))/sizeCorrectorX, multiple*cellX)
-    # sizeY = nceil(sqrt(len(data))/sizeCorrectorY, multiple*cellY)
+    zoneSize = len(data) // cellY
 
     image = Image.new(mode='RGBA', size=(sizeX, sizeY), color='white')
 
-    print("Processing...")
-    oor = 0
+    print("=== Starting processing on %s child processe(s) ===" % str(processes))
+    pool = Pool(processes)
+    args = []
+    for line in range(0, sizeY):
+        for pixel in range(0, sizeX):
+            args.append((mode, data, line, pixel, sizeY, sizeX, cellY, cellX, zoneSize))
 
-    if mode == 'offset':
-        for line in range(0, sizeY):
-            for pixel in range(0, sizeX):
-                colorData = []
-                for y in range(0, cellY):
-                    chanData = 0
-                    for x in range(0, cellX):
-                        try:
-                            chanData += int(data[(line*cellY+y) * sizeX*cellX + (pixel*cellX+x)])
-                        except IndexError:
-                            oor += 1
-                            chanData = 0
-                    chanData = int(linear(chanData, 0, cellX, 0, 255))
-                    colorData.append(chanData)
-                image.putpixel((pixel, line), tuple(colorData))
-            print("Processed line", line, "/", sizeY)
+    imageData = pool.starmap(computePixel, args)
 
-    elif mode == 'split':
-        zoneSize = len(data) // cellY
-
-        for line in range(0, sizeY):
-            for pixel in range(0, sizeX):
-                colorData = []
-                for y in range(0, cellY):
-                    chanData = 0
-                    for x in range(0, cellX):
-                        try:
-                            chanData += int(data[line*sizeX*cellX + zoneSize*y + pixel*cellX+x])
-                        except IndexError:
-                            oor += 1
-                            chanData = 0
-                    chanData = int(linear(chanData, 0, cellX, 0, 255))
-                    colorData.append(chanData)
-                image.putpixel((pixel, line), tuple(colorData))
-            print("Processed line", line, "/", sizeY)
-
-    elif mode == 'sliding':
-        for line in range(0, sizeY):
-            for pixel in range(0, sizeX):
-                try:
-                    colorData = []
-                    for y in range(int((1-cellY)/2), int((1+cellY)/2)):
-                        chanData = 0
-                        for x in range(int((1-cellX)/2), int((1+cellX)/2)):
-                            chanData += int(data[(line+y) * sizeX + pixel+x])
-                            chanData = int(linear(chanData, 0, cellX, 0, 255))
-                        colorData.append(chanData)
-                    image.putpixel((pixel, line), tuple(colorData))
-                except IndexError:
-                    oor += 1
-            print("Processed line", line, "/", sizeY)
-
-    else:
-        for line in range(0, sizeY):
-            for pixel in range(0, sizeX):
-                try:
-                    if data[line * sizeX + pixel] == '1':
-                        image.putpixel((pixel, line), (0, 0, 0))
-                except IndexError:
-                    oor += 1
-            print("Processed line", line, "/", sizeY)
-
-    print("OOR:", oor)
-    print("Saving...")
+    print("Saving %s ..." % name)
+    image.putdata(imageData)
     image = image.resize((sizeX * scale, sizeY * scale))
     image.save(name + '.png')
     print("Done !")
-
-def percentOfChar(data, char):
-    """Returns the percent of a given char in a string.\n
-    data: String, the input
-    char: String, the char to count"""
-
-    return data.count(char)/len(data)*100
-
-def nceil(x, n=1):
-    """Returns the next n-multiple of a number.\n
-    x: Float, the input number
-    n: Float, will be the next multiple of this number"""
-    y = ceil(x) - ceil(x) % n
-    if y < x:
-        y += n
-
-    print(str(x) + ":" + str(y))
-    return y
 
 
 if __name__=='__main__':
     while True:
         f = input("Path: ")
+        if f == '':
+            exit()
         data = bitsFromFile(f)
         #data = truncate(data, 45, 55)
         #print(data)
         #print(percentOfChar(data, '1'))
 
-        map(data, scale=4, ratio=16/9, multiple=16, cellX=1, cellY=1, mode='bin', name=f+'-bin')
+        #map(data, scale=4, ratio=16/9, multiple=16, cellX=1, cellY=1, mode='bin', name=f+'-bin', processes=8)
         #map(data, scale=4, ratio=16/9, multiple=16, cellX=3, cellY=3, mode='sliding', name=f+'-sliding')
         for integ in (64, 32, 24, 16, 12, 8, 6, 4, 2, 1):
-            map(data, scale=4, ratio=16/9, multiple=16, cellX=integ, cellY=3, mode='split', name=f+'-'+str(integ))
+            map(data, scale=4, ratio=16/9, multiple=16, cellX=integ, cellY=3, mode='offset', name=f+'-'+str(integ), processes=8)
