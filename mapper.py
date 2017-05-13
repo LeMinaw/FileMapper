@@ -28,7 +28,7 @@ def nceil(x, n=1):
     return y
 
 
-def linear(x, xMin, xMax, yMin, yMax):
+def linear(x, xMin, xMax, yMin=0, yMax=1):
     """Simple linear range conversion"""
     return (x - xMin) * (yMax - yMin) / (xMax - xMin) + yMin
 
@@ -91,21 +91,32 @@ def computePixel(mode, data, line, pixel, sizeY, sizeX, cellY, cellX, zoneSize):
                 return (0, 0, 0)
         except IndexError:
             pass
-        return 0
+        return (255, 255, 255)
     else:
         colorData = []
-        for y in range(0, cellY):
-            chanData = 0
+        if mode =='y-offset':
             for x in range(0, cellX):
-                try:
-                    if mode == 'offset':
-                        chanData += int(data[(line*cellY+y) * sizeX*cellX + (pixel*cellX+x)])
-                    elif mode == 'split':
-                        chanData += int(data[line*sizeX*cellX + zoneSize*y + pixel*cellX+x])
-                except IndexError:
-                    chanData = 0
-            chanData = int(linear(chanData, 0, cellX, 0, 255))
-            colorData.append(chanData)
+                chanData = 0
+                for y in range(0, cellY):
+                    try:
+                        chanData += int(data[(line*cellY+y) * sizeX*cellX + pixel*cellX+x])
+                    except IndexError:
+                        chanData = 0
+                chanData = int(linear(chanData, 0, cellY, 0, 255))
+                colorData.append(chanData)
+        else:
+            for y in range(0, cellY):
+                chanData = 0
+                for x in range(0, cellX):
+                    try:
+                        if mode == 'offset':
+                            chanData += int(data[(line*cellY+y) * sizeX*cellX + (pixel*cellX+x)])
+                        elif mode == 'split':
+                            chanData += int(data[line*sizeX*cellX + zoneSize*y + pixel*cellX+x])
+                    except IndexError:
+                        chanData = 0
+                chanData = int(linear(chanData, 0, cellX, 0, 255))
+                colorData.append(chanData)
         return tuple(colorData)
 
     # Old snippet from an old mode :
@@ -164,11 +175,15 @@ if __name__=='__main__':
         if f == '':
             exit()
         data = bitsFromFile(f)
-        #data = truncate(data, 45, 55)
+        #data = truncate(data, 50, 51)
         #print(data)
         #print(percentOfChar(data, '1'))
 
-        #map(data, scale=4, ratio=16/9, multiple=16, cellX=1, cellY=1, mode='bin', name=f+'-bin', processes=8)
-        #map(data, scale=4, ratio=16/9, multiple=16, cellX=3, cellY=3, mode='sliding', name=f+'-sliding')
+        map(data, scale=4, ratio=16/9, multiple=16, cellX=1, cellY=1, mode='bin', name=f+'-bin', processes=8)
         for integ in (64, 32, 24, 16, 12, 8, 6, 4, 2, 1):
+            # map(data, scale=4, ratio=16/9, multiple=16, cellX=3, cellY=integ, mode='y-offset', name=f+'-'+str(integ), processes=8)
             map(data, scale=4, ratio=16/9, multiple=16, cellX=integ, cellY=3, mode='offset', name=f+'-'+str(integ), processes=8)
+
+        # for i in range(0, 200):
+        #     trump = truncate(data, i/4, 50+i/4)
+        #     map(trump, scale=4, ratio=16/9, multiple=16, cellX=4, cellY=3, mode='offset', name=f+'-'+str(i), processes=8)
