@@ -24,7 +24,6 @@ def nceil(x, n=1):
     y = ceil(x) - ceil(x) % n
     if y < x:
         y += n
-
     return y
 
 
@@ -38,7 +37,7 @@ def gcd(x, y):
     if y == 0:
         return x
     else:
-        return gcd(y, x%y)
+        return gcd(y, x % y)
 
 
 def lcm(x, y):
